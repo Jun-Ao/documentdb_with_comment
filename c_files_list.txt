@@ -1,13 +1,3 @@
-./pg_documentdb/include/aggregation/bson_tree_common.h
-./pg_documentdb/include/aggregation/bson_tree_private.h
-./pg_documentdb/include/aggregation/bson_tree_write.h
-./pg_documentdb/include/api_hooks.h
-./pg_documentdb/include/api_hooks_common.h
-./pg_documentdb/include/api_hooks_def.h
-./pg_documentdb/include/background_worker/background_worker_job.h
-./pg_documentdb/include/commands/coll_mod.h
-./pg_documentdb/include/commands/commands_common.h
-./pg_documentdb/include/commands/connection_management.h
 ./pg_documentdb/include/commands/create_indexes.h
 ./pg_documentdb/include/commands/cursor_common.h
 ./pg_documentdb/include/commands/cursor_private.h
