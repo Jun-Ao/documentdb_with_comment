@@ -4,7 +4,23 @@
  * src/distribution/cluster_operations.c
  *
  * Implementation of a set of cluster operations (e.g. upgrade, initialization, etc).
+ *-------------------------------------------------------------------------
+ * 集群操作实现
  *
+ * 本文件实现了 DocumentDB 分布式集群的初始化、升级和配置管理功能。
+ *
+ * 主要功能：
+ * 1. 集群初始化（command_initialize_cluster）：首次部署时设置分布式环境
+ * 2. 集群升级（command_complete_upgrade）：执行扩展版本升级
+ * 3. 元数据表管理：创建和配置分布式参考表
+ * 4. 版本管理：跟踪集群和扩展的版本信息
+ * 5. 权限管理：配置只读角色和管理员角色权限
+ *
+ * 核心概念：
+ * - 集群版本：记录集群的部署和升级版本
+ * - 参考表（Reference Table）：在所有工作节点上复制的小型元数据表
+ * - 分布式函数：可以下推到工作节点执行的函数
+ * - 版本兼容性：处理混合版本环境下的架构变更
  *-------------------------------------------------------------------------
  */
 #include "postgres.h"
@@ -35,41 +51,70 @@ extern char *ApiExtensionName;
 extern char *ApiGucPrefix;
 extern char *ClusterAdminRole;
 
+/* 分布式 API 的 schema 名称 */
 char *ApiDistributedSchemaName = "documentdb_api_distributed";
 char *ApiDistributedSchemaNameV2 = "documentdb_api_distributed";
+/* 分布式扩展的名称 */
 char *DistributedExtensionName = "documentdb_distributed";
+/* 是否创建分布式函数的标志 */
 bool CreateDistributedFunctions = false;
 
+/*
+ * 集群操作版本信息结构
+ * -----
+ * 用于跟踪集群的版本状态，包括当前安装的版本和上次升级的版本
+ */
 typedef struct ClusterOperationVersions
 {
-	ExtensionVersion InstalledVersion;
-	ExtensionVersion LastUpgradeVersion;
+	ExtensionVersion InstalledVersion;    /* 当前安装的扩展版本 */
+	ExtensionVersion LastUpgradeVersion;  /* 上次升级到的版本 */
 } ClusterOperationVersions;
 
 extern char * GetIndexQueueName(void);
 
+/* 静态函数声明 */
+/* 获取集群初始化版本 */
 static char * GetClusterInitializedVersion(void);
+/* 分发 CRUD 函数到工作节点 */
 static void DistributeCrudFunctions(void);
+/* 创建索引构建队列表 */
 static void CreateIndexBuildsTable(bool includeOptions, bool includeDropCommandType);
+/* 创建数据库名称验证触发器 */
 static void CreateValidateDbNameTrigger(void);
+/* 修改默认数据库对象（用于版本兼容） */
 static void AlterDefaultDatabaseObjects(void);
+/* 更新集群元数据版本信息 */
 static char * UpdateClusterMetadata(bool isInitialize);
+/* 创建分布式参考表 */
 static void CreateReferenceTable(const char *tableName);
+/* 创建分布式函数 */
 static void CreateDistributedFunction(const char *functionName, const
 									  char *distributionArgName,
 									  const char *colocateWith, const
 									  char *forceDelegation);
+/* 删除旧的变更流相关对象 */
 static void DropLegacyChangeStream(void);
+/* 触发集群元数据缓存失效 */
 static void TriggerInvalidateClusterMetadata(void);
+/* 为集合表添加视图定义列 */
 static void AddCollectionsTableViewDefinition(void);
+/* 为集合表添加验证列 */
 static void AddCollectionsTableValidationColumns(void);
+/* 创建扩展版本触发器 */
 static void CreateExtensionVersionsTrigger(void);
+/* 比较两个版本是否相等 */
 static bool VersionEquals(ExtensionVersion versionA, ExtensionVersion versionB);
+/* 获取已安装的扩展版本 */
 static void GetInstalledVersion(ExtensionVersion *installedVersion);
+/* 解析版本字符串 */
 static void ParseVersionString(ExtensionVersion *extensionVersion, char *versionString);
+/* 设置集群（初始化或升级） */
 static bool SetupCluster(bool isInitialize);
+/* 设置只读角色的权限 */
 static void SetPermissionsForReadOnlyRole(void);
+/* 检查并复制参考表 */
 static void CheckAndReplicateReferenceTable(const char *schema, const char *tableName);
+/* 更新 changes 表的所有者为管理员角色 */
 static void UpdateChangesTableOwnerToAdminRole(void);
 
 
@@ -79,6 +124,16 @@ PG_FUNCTION_INFO_V1(command_complete_upgrade);
 /*
  * command_initialize_cluster implements the core
  * logic to initialize the extension in the cluster
+ * -----
+ * 实现 initialize_cluster 命令
+ *
+ * 此函数在首次部署 DocumentDB 分布式扩展时调用，负责：
+ * 1. 检查集群是否已初始化
+ * 2. 创建必要的元数据表（参考表）
+ * 3. 配置分布式函数
+ * 4. 设置权限和触发器
+ *
+ * 注意：如果集群已经初始化，此函数将跳过所有操作。
  */
 Datum
 command_initialize_cluster(PG_FUNCTION_ARGS)
@@ -101,11 +156,22 @@ command_initialize_cluster(PG_FUNCTION_ARGS)
 /*
  * command_complete_upgrade executes the necessary steps
  * to perform an extension upgrade.
+ * -----
+ * 实现 complete_upgrade 命令
+ *
+ * 此函数在扩展升级时调用，负责：
+ * 1. 暂时关闭磁盘满的只读限制（确保升级可以执行）
+ * 2. 执行版本升级脚本
+ * 3. 更新元数据表结构
+ * 4. 恢复 GUC 设置
+ *
+ * 返回值：true 表示执行了升级，false 表示已是最新版本
  */
 Datum
 command_complete_upgrade(PG_FUNCTION_ARGS)
 {
 	/* Since complete_upgrade is internal operation, if the disk is full and we have readonly setting on, we should be able to upgrade so we turn off. */
+	/* 由于 complete_upgrade 是内部操作，如果磁盘已满且启用了只读设置，我们应该能够升级，因此关闭只读限制 */
 	int savedGUCLevel = NewGUCNestLevel();
 	SetGUCLocally(psprintf("%s.IsPgReadOnlyForDiskFull", ApiGucPrefix), "false");
 
@@ -122,6 +188,14 @@ command_complete_upgrade(PG_FUNCTION_ARGS)
  * Helper function that checks if the setup scripts for a given extension version must be executed
  * in SetupCluster. It checks whether it's greater than the last upgraded version and less or equal
  * than the current installed version.
+ * -----
+ * 辅助函数：检查是否应该执行指定版本的设置脚本
+ *
+ * 判断逻辑：
+ * - 该版本必须大于上次升级的版本
+ * - 该版本必须小于或等于当前安装的版本
+ *
+ * 这确保了设置脚本只在适当的版本范围内执行一次。
  */
 static inline bool
 ShouldRunSetupForVersion(ClusterOperationVersions *versions,
@@ -133,6 +207,7 @@ ShouldRunSetupForVersion(ClusterOperationVersions *versions,
 }
 
 
+/* 钩子函数的包装器，用于 ShouldRunSetupForVersion */
 static bool
 ShouldRunSetupForVersionForHook(void *versionsVoid,
 								int major, int minor, int patch)
@@ -144,6 +219,29 @@ ShouldRunSetupForVersionForHook(void *versionsVoid,
 
 /*
  * Function that runs the necessary steps to initialize and upgrade a cluster.
+ * -----
+ * 执行集群初始化和升级的核心函数
+ *
+ * 此函数是集群设置的核心，根据版本差异执行相应的升级脚本。
+ *
+ * 主要步骤：
+ * 1. 确保元数据表已复制到所有节点
+ * 2. 更新集群版本元数据
+ * 3. 根据版本范围执行相应的设置脚本
+ * 4. 调用后设置钩子允许扩展进行额外配置
+ * 5. 触发元数据缓存失效
+ *
+ * 版本升级脚本示例：
+ * - v0.0.5: 创建参考表、分发 CRUD 函数
+ * - v0.0.7: 添加集合表视图定义
+ * - v0.0.8: 创建扩展版本触发器、添加验证列
+ * - v0.1.2: 创建索引构建队列表
+ * - v0.1.4: 删除旧的变更流对象
+ * - v0.1.7: 设置只读角色权限
+ * - v0.2.3: 添加主键约束
+ * - v0.10.2: 更新 changes 表所有者
+ *
+ * 返回值：true 表示执行了升级，false 表示已是最新版本
  */
 static bool
 SetupCluster(bool isInitialize)
@@ -345,6 +443,11 @@ SetupCluster(bool isInitialize)
 /*
  * Returns the current installed version of the extension in the cluster. If it's not installed,
  * then NULL is returned.
+ * -----
+ * 获取集群的初始化版本
+ *
+ * 从 cluster_data 表中查询 initialized_version 字段。
+ * 如果返回 NULL，表示集群尚未初始化。
  */
 static char *
 GetClusterInitializedVersion()
@@ -369,6 +472,15 @@ GetClusterInitializedVersion()
 
 /*
  * Creates all distributed objects required by the extension to run in the cluster.
+ * -----
+ * 创建扩展在集群中运行所需的所有分布式对象
+ *
+ * 此函数负责：
+ * 1. 将 changes 表转换为分布式表（使用 shard_key_value 分片）
+ * 2. 创建分布式 CRUD 函数（delete_one、insert_one、update_one）
+ *
+ * 分布式函数允许这些操作直接在工作节点上执行，减少网络开销。
+ * 这些函数与 changes 表共置，确保数据局部性。
  */
 static void
 DistributeCrudFunctions()
@@ -437,6 +549,17 @@ DistributeCrudFunctions()
 
 /*
  * Create index queue table, its indexes and grant permissions.
+ * -----
+ * 创建索引队列表及其索引和权限
+ *
+ * 此函数创建用于后台索引构建的队列表：
+ * 1. 删除旧的队列表（如果存在）
+ * 2. 创建新的队列表
+ * 3. 将表添加到 Citus 元数据（作为本地表）
+ *
+ * 参数：
+ * - includeOptions: 是否包含索引选项字段
+ * - includeDropCommandType: 是否包含删除命令类型字段
  */
 static void
 CreateIndexBuildsTable(bool includeOptions, bool includeDropCommandType)
@@ -463,6 +586,11 @@ CreateIndexBuildsTable(bool includeOptions, bool includeDropCommandType)
 
 /*
  * Create validate_dbname trigger on the collections table.
+ * -----
+ * 在集合表上创建数据库名称验证触发器
+ *
+ * 此触发器确保插入或更新的集合使用有效的数据库名称。
+ * 防止非法或不存在的数据库被引用。
  */
 static void
 CreateValidateDbNameTrigger()
@@ -485,6 +613,13 @@ CreateValidateDbNameTrigger()
 /*
  * Handle failures if the worker has the attribute.
  * This handles mixed schema versioning.
+ * -----
+ * 处理工作节点已存在属性的情况
+ *
+ * 此函数用于处理混合版本环境下的架构变更。
+ * 使用子事务来优雅地处理失败场景。
+ *
+ * 返回值：true 表示属性添加成功，false 表示属性已存在
  */
 static bool
 AddAttributeHandleIfExists(const char *addAttributeQuery)
@@ -537,6 +672,19 @@ AddAttributeHandleIfExists(const char *addAttributeQuery)
 /*
  * Change internal tables to include new fields and constraints required by the extension.
  * TODO: Remove this after Cluster Version 1.23-0
+ * -----
+ * 修改内部表以包含扩展所需的新字段和约束
+ *
+ * 此函数处理混合版本环境下的类型变更：
+ * 1. 为 index_spec_type_internal 类型添加 cosmos_search_options 属性
+ * 2. 为 index_spec_type_internal 类型添加 index_options 属性
+ *
+ * 注意：此函数仅在集群版本低于 1.23-0 时需要。
+ *       之后可以移除，因为这些变更将在扩展升级脚本中处理。
+ *
+ * 混合版本处理：
+ * - 如果工作节点已有属性但协调器没有，禁用 DDL 传播后重试
+ * - 使用子事务确保错误可以优雅地处理
  */
 static void
 AlterDefaultDatabaseObjects()
@@ -583,6 +731,11 @@ AlterDefaultDatabaseObjects()
 
 /*
  * Adds bson column view_definition to the collections table.
+ * -----
+ * 为集合表添加 view_definition 列
+ *
+ * 此列用于存储视图集合的定义（如果集合是视图）。
+ * 类型为 documentdb_core.bson，默认值为 null。
  */
 static void
 AddCollectionsTableViewDefinition()
@@ -601,6 +754,13 @@ AddCollectionsTableViewDefinition()
 
 /*
  * Add schema validation columns to the collections table.
+ * -----
+ * 为集合表添加模式验证列
+ *
+ * 添加三个新列用于支持 MongoDB 的 JSON Schema 验证功能：
+ * 1. validator (bson): 存储验证规则文档
+ * 2. validation_level (text): 验证级别（off/strict/moderate）
+ * 3. validation_action (text): 验证失败时的操作（warn/error）
  */
 static void
 AddCollectionsTableValidationColumns()
@@ -622,6 +782,15 @@ AddCollectionsTableValidationColumns()
 
 /*
  * Creates trigger for updates or deletes in the cluster_data table from the catalog schema.
+ * -----
+ * 创建扩展版本触发器
+ *
+ * 此触发器在 cluster_data 表发生更新或删除时触发，
+ * 用于更新其他进程中的缓存版本信息。
+ *
+ * 触发时机：AFTER UPDATE OR DELETE
+ * 触发级别：FOR STATEMENT（语句级）
+ * 作用：确保所有进程获取最新的集群元数据
  */
 static void
 CreateExtensionVersionsTrigger()
@@ -646,6 +815,15 @@ CreateExtensionVersionsTrigger()
 
 /*
  * Create a distributed reference table.
+ * -----
+ * 创建分布式参考表
+ *
+ * 参考表是 Citus 中的一种特殊表类型，会在所有工作节点上完整复制。
+ * 适用于：
+ * - 小型元数据表（如 collections、collection_indexes）
+ * - 需要在所有节点上频繁访问的配置表
+ *
+ * 参数：tableName - 要创建为参考表的表名
  */
 static void
 CreateReferenceTable(const char *tableName)
@@ -664,6 +842,17 @@ CreateReferenceTable(const char *tableName)
 
 /*
  * Create a distributed function.
+ * -----
+ * 创建分布式函数
+ *
+ * 分布式函数可以在工作节点上执行，减少数据传输。
+ * 函数会根据分布参数的值路由到相应的工作节点。
+ *
+ * 参数：
+ * - functionName: 函数的完整签名（包括参数类型）
+ * - distributionArgName: 用于分片的参数名
+ * - colocateWith: 共置表名（通常是与 changes 表共置）
+ * - forceDelegation: 是否强制委托到工作节点执行
  */
 static void
 CreateDistributedFunction(const char *functionName, const char *distributionArgName,

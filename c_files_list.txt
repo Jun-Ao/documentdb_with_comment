@@ -1,8 +1,3 @@
-./internal/pg_documentdb_distributed/src/colocation/shard_colocation.c
-./internal/pg_documentdb_distributed/src/distribution/cluster_operations.c
-./internal/pg_documentdb_distributed/src/distribution/cluster_versioning.c
-./internal/pg_documentdb_distributed/src/distribution/distributed_hooks.c
-./internal/pg_documentdb_distributed/src/distribution/distributed_index_operations.c
 ./internal/pg_documentdb_distributed/src/distribution/node_distribution_operations.c
 ./internal/pg_documentdb_distributed/src/documentdb_distributed.c
 ./internal/pg_documentdb_distributed/src/documentdb_distributed_init.c

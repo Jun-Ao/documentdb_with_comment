@@ -4,7 +4,21 @@
  * src/colocation/shard_colocation.c
  *
  * Implementation of colocation and distributed placement for the extension.
+ *-------------------------------------------------------------------------
+ * 分片共置和分布式放置的实现
  *
+ * 本文件实现了 DocumentDB 在分布式环境（基于 Citus）下的分片共置和分布式放置功能。
+ *
+ * 主要功能：
+ * 1. 分片映射管理：获取集群中的节点信息，生成 MongoDB 兼容的分片映射
+ * 2. 集合共置配置：控制不同集合的数据是否放置在相同的物理分片上
+ * 3. 分片移动：将集合从一个分片移动到另一个分片
+ * 4. 分布式查询重写：将 MongoDB 的元数据查询转换为 Citus 分布式查询
+ *
+ * 核心概念：
+ * - 共置（Colocation）：多个集合共享相同的物理分片，减少跨节点查询
+ * - 分片（Shard）：数据分片的基本单位，每个分片对应一个 groupId
+ * - 节点（Node）：集群中的物理服务器，每个节点可以托管多个分片
  *-------------------------------------------------------------------------
  */
 
@@ -46,84 +60,150 @@ PG_FUNCTION_INFO_V1(documentdb_command_move_collection);
  * Metadata collected about Citus nodes.
  * This is the output that we care about collected from
  * Citus's pg_dist_node.
+ * -----
+ * 从 Citus 节点收集的元数据结构
+ * 这些信息从 Citus 的 pg_dist_node 系统表中收集而来
+ * 用于构建 MongoDB 兼容的分片映射
  */
 typedef struct NodeInfo
 {
 	/*
 	 * The groupId for the node. This has 1 per
 	 * server (Coordinator, Worker1, Worker2)
+	 * -----
+	 * 节点的组 ID，每个服务器（协调器、工作节点1、工作节点2）都有一个唯一的 groupId
+	 * 同一个 groupId 下的节点托管相同的数据分片
 	 */
 	int32_t groupId;
 
 	/*
 	 * An id for the specific node
+	 * -----
+	 * 特定节点的唯一标识符
 	 */
 	int32_t nodeId;
 
 	/*
 	 * The citus role for the node, be it
 	 * Primary or secondary (for replicas)
+	 * -----
+	 * 节点的 Citus 角色，可能是 primary（主节点）或 secondary（副本节点）
 	 */
 	const char *nodeRole;
 
 	/*
 	 * The name of the cluster: Default for writes
 	 * and the clustername for reads.
+	 * -----
+	 * 集群名称：写入操作使用 "Default"，读取操作使用实际的集群名称
 	 */
 	const char *nodeCluster;
 
 	/*
 	 * Whether or not th enode is active (false in
 	 * the case it's in the middle of an addnode)
+	 * -----
+	 * 节点是否处于活跃状态
+	 * 在添加节点的过程中，节点可能处于非活跃状态
 	 */
 	bool isactive;
 
 	/*
 	 * The formatted node name
 	 * uses node_<clusterName>_<nodeId>
+	 * -----
+	 * 格式化的节点名称，格式为 node_<集群名称>_<节点ID>
+	 * 这是 MongoDB 兼容的节点名称格式
 	 */
 	const char *mongoNodeName;
 
 	/*
 	 * The logical shard for the node "shard_<groupId>"
+	 * -----
+	 * 节点的逻辑分片名称，格式为 shard_<groupId>
+	 * 每个 groupId 对应一个逻辑分片
 	 */
 	const char *mongoShardName;
 } NodeInfo;
 
 
+/*
+ * Static function declarations
+ * -----
+ * 静态函数声明
+ */
+
+/* 将两个未分片的 Citus 表进行共置 */
 static const char * ColocateUnshardedCitusTables(const char *sourceTableName,
 												 const char *colocateWithTableName);
+/* 获取分布式表的分片数量 */
 static int GetShardCountForDistributedTable(Oid relationId);
 
+/* 获取表的共置 ID */
 static int GetColocationForTable(Oid tableOid, const char *collectionName,
 								 const char *tableName);
 
+/* 将已分片的 Citus 表与 "none" 进行共置（移除共置） */
 static void ColocateShardedCitusTablesWithNone(const char *sourceTableName);
+/* 将未分片的 Citus 表与 "none" 进行共置（移除共置） */
 static void ColocateUnshardedCitusTablesWithNone(const char *sourceTableName);
+/* 将单个分片移动到目标分布式表 */
 static void MoveShardToDistributedTable(const char *postgresTableToMove, const
 										char *targetShardTable);
+/* 取消表的分布式配置并重新配置 */
 static void UndistributeAndRedistributeTable(const char *postgresTable, const
 											 char *colocateWith,
 											 const char *shardKeyValue);
 
 /* Handle a colocation scenario for collMod */
+/* 处理 collMod 命令中的共置配置场景 */
 static void HandleDistributedColocation(MongoCollection *collection,
 										const bson_value_t *colocationValue);
+/* 重写 listCollections 查询以支持分布式环境 */
 static Query * RewriteListCollectionsQueryForDistribution(Query *source);
+/* 重写 config.shards 查询以支持分布式环境 */
 static Query * RewriteConfigShardsQueryForDistribution(Query *source);
+/* 重写 config.chunks 查询以支持分布式环境 */
 static Query * RewriteConfigChunksQueryForDistribution(Query *source);
 
+/* 获取集群中的分片映射节点列表 */
 static List * GetShardMapNodes(void);
+/* 将分片映射信息写入 BSON writer */
 static void WriteShardMap(pgbson_writer *writer, List *groupNodes);
+/* 将分片列表信息写入 BSON writer */
 static void WriteShardList(pgbson_writer *writer, List *groupNodes);
 
 /*
  * Implements the getShardMap command
+ * -----
+ * 实现 getShardMap 命令
+ *
+ * 此函数实现 MongoDB 的 getShardMap 命令，返回集群的分片映射信息。
+ * 返回格式包含：
+ * - map: 分片到节点的映射
+ * - hosts: 主机列表
+ * - nodes: 节点详细信息
+ *
+ * 与 MongoDB 兼容的返回格式：
+ * {
+ *   "map": {
+ *     "shard_0": "node_default_0,node_default_1",
+ *     "shard_1": "node_default_2"
+ *   },
+ *   "hosts": {
+ *     "node_default_0": "shard_0",
+ *     "node_default_1": "shard_0"
+ *   },
+ *   "nodes": {
+ *     "node_default_0": { "role": "primary", "active": true, "cluster": "default" }
+ *   }
+ * }
  */
 Datum
 command_get_shard_map(PG_FUNCTION_ARGS)
 {
 	/* First query pg_dist_node to get the set of nodes in the cluster */
+	/* 首先查询 pg_dist_node 获取集群中的节点集合 */
 	pgbson_writer writer;
 	PgbsonWriterInit(&writer);
 
@@ -139,6 +219,19 @@ command_get_shard_map(PG_FUNCTION_ARGS)
 }
 
 
+/*
+ * Implements the listShards command
+ * -----
+ * 实现 listShards 命令
+ *
+ * 此函数返回集群中的分片列表，包含每个分片的节点信息。
+ * 返回格式：
+ * {
+ *   "shards": [
+ *     { "_id": "shard_0", "nodes": "node_default_0,node_default_1" }
+ *   ]
+ * }
+ */
 Datum
 command_list_shards(PG_FUNCTION_ARGS)
 {
@@ -157,6 +250,29 @@ command_list_shards(PG_FUNCTION_ARGS)
 }
 
 
+/*
+ * Implements the moveCollection command
+ * -----
+ * 实现 moveCollection 命令
+ *
+ * 此函数实现 MongoDB 的 moveCollection 命令，将一个未分片的集合从一个分片移动到另一个分片。
+ *
+ * 参数：
+ * - moveCollection: 要移动的集合命名空间（db.collection）
+ * - toShard: 目标分片名称（格式：shard_<groupId>）
+ * - useLogicalReplication: 是否使用逻辑复制（可选，默认使用 block_writes 模式）
+ *
+ * 流程：
+ * 1. 验证目标分片的有效性
+ * 2. 检查集合是否为未分片集合
+ * 3. 解除集合的当前共置关系
+ * 4. 将重试表与主表重新共置
+ * 5. 调用 Citus 的 move_shard_placement 函数移动分片
+ *
+ * 限制：
+ * - 只能移动未分片的集合
+ * - 需要通过 EnableMoveCollection 配置启用
+ */
 Datum
 documentdb_command_move_collection(PG_FUNCTION_ARGS)
 {
@@ -362,19 +478,51 @@ documentdb_command_move_collection(PG_FUNCTION_ARGS)
 
 /*
  * override hooks related to colocation.
+ * -----
+ * 注册与共置相关的钩子函数
+ *
+ * 此函数在模块初始化时调用，将自定义的处理函数注册到钩子中，
+ * 以便在分布式环境下拦截和处理相关操作。
  */
 void
 UpdateColocationHooks(void)
 {
+	/* 注册共置处理钩子 */
 	handle_colocation_hook = HandleDistributedColocation;
+	/* 注册 listCollections 查询重写钩子 */
 	rewrite_list_collections_query_hook = RewriteListCollectionsQueryForDistribution;
+	/* 注册 config.shards 查询重写钩子 */
 	rewrite_config_shards_query_hook = RewriteConfigShardsQueryForDistribution;
+	/* 注册 config.chunks 查询重写钩子 */
 	rewrite_config_chunks_query_hook = RewriteConfigChunksQueryForDistribution;
 }
 
 
 /*
  * Process colocation options for a distributed DocumentDB deployment.
+ * -----
+ * 处理分布式 DocumentDB 部署的共置选项
+ *
+ * 此函数处理 createCollection 或 collMod 命令中的共置配置。
+ *
+ * 共置选项格式：
+ * {
+ *   "colocation": {
+ *     "collection": "other_collection"  // 与另一个集合共置
+ *     // 或
+ *     "collection": null  // 取消共置
+ *   }
+ * }
+ *
+ * 参数：
+ * - collection: 要配置共置的集合
+ * - colocationValue: 共置配置文档
+ *
+ * 共置规则：
+ * 1. 已分片的集合只能与 null 共置（取消共置）
+ * 2. 未分片的集合可以与另一个未分片的集合共置
+ * 3. 与 changes 表共置的集合需要先取消共置
+ * 4. 目标集合必须只有一个分片
  */
 static void
 HandleDistributedColocation(MongoCollection *collection, const
@@ -548,14 +696,31 @@ HandleDistributedColocation(MongoCollection *collection, const
 
 /*
  * Rewrite/Update the metadata query for distributed information.
- * The original listCollections query looks like
- * SELECT bson_dollar_project(row_get_bson(collections), '{ "ns": { "$concat": [ "$database_name", "$collection_name" ], ... }}) FROM ApiCatalogSchema.collections WHERE database_name = 'db';
+ * -----
+ * 重写 listCollections 查询以支持分布式环境
  *
- * This modifies it to the following:
- * SELECT bson_dollar_addfields(bson_dollar_project(row_get_bson(collections), '{ "ns": { "$concat": [ "$database_name", "$collection_name" ], ... }}),
- *		  bson_repath_and_build('shardcount', pg_dist_colocation.shard_count, 'colocationid', pg_dist_partition.colocationid) FROM ApiCatalogSchema.collections, pg_dist_partition, pg_dist_colocation
+ * 原始查询（单机模式）：
+ * SELECT bson_dollar_project(row_get_bson(collections),
+ *   '{ "ns": { "$concat": [ "$database_name", ".", "$collection_name" ]}, ... }')
+ * FROM ApiCatalogSchema.collections
+ * WHERE database_name = 'db';
+ *
+ * 重写后的查询（分布式模式）：
+ * SELECT bson_dollar_addfields(
+ *   bson_dollar_project(row_get_bson(collections), ...),
+ *   bson_repath_and_build(
+ *     'shardCount', pg_dist_colocation.shard_count,
+ *     'colocationId', pg_dist_partition.colocationid
+ *   )
+ * )
+ * FROM ApiCatalogSchema.collections, pg_dist_partition, pg_dist_colocation
  * WHERE database_name = 'db'
- * AND pg_dist_partition.colocationid = pg_dist_colocation.colocationid AND textcatany('ApiDataSchema.documents_', collections.collection_id)::regclass = pg_dist_partition.logicalrelid;
+ * AND pg_dist_partition.colocationid = pg_dist_colocation.colocationid
+ * AND ('ApiDataSchema.documents_' || collection_id)::regclass = pg_dist_partition.logicalrelid;
+ *
+ * 作用：
+ * 1. 将集合查询与 Citus 分布式元数据表关联
+ * 2. 添加分片数量和共置 ID 信息到返回结果
  */
 static Query *
 RewriteListCollectionsQueryForDistribution(Query *source)
@@ -703,8 +868,19 @@ RewriteListCollectionsQueryForDistribution(Query *source)
 
 /*
  * The config.shards query in a distributed query scenario
- * will end up querying the pg_dist_node table to get the list of shards
- * and output them in a compatible format.
+ * -----
+ * 重写 config.shards 查询以支持分布式环境
+ *
+ * 在分布式查询场景中，此函数查询 pg_dist_node 表来获取分片列表，
+ * 并以 MongoDB 兼容的格式输出。
+ *
+ * 返回格式：
+ * {
+ *   "document": [
+ *     { "_id": "shard_0", "host": "node_default_0", "state": "..." },
+ *     { "_id": "shard_1", "host": "node_default_1", "state": "..." }
+ *   ]
+ * }
  */
 static Query *
 RewriteConfigShardsQueryForDistribution(Query *baseQuery)
@@ -771,6 +947,7 @@ RewriteConfigShardsQueryForDistribution(Query *baseQuery)
 }
 
 
+/* 获取 Citus 的 citus_shard_sizes 函数的 OID */
 static Oid
 GetCitusShardSizesFunctionOid(void)
 {
@@ -784,11 +961,34 @@ GetCitusShardSizesFunctionOid(void)
 
 /*
  * Provides the output for the config.chunks query after consulting with Citus.
- * This will be the query:
- * WITH coll AS (SELECT database_name, collection_name, ('ApiDataSchemaName.documents_' || collection_id)::regclass AS tableId FROM ApiCatalogSchema.collections)
- * SELECT database_name, collection_name, shardid, size, shardminvalue, shardmaxvalue FROM coll
- *  JOIN pg_dist_shard dist ON coll.tableId = dist.logicalrelid
- *  JOIN citus_shard_sizes() sz ON dist.shardid = sz.shard_id;
+ * -----
+ * 重写 config.chunks 查询以支持分布式环境
+ *
+ * 查询 Citus 分布式元数据表，获取每个集合的分片信息。
+ *
+ * 生成的查询：
+ * WITH coll AS (
+ *   SELECT database_name, collection_name,
+ *     ('ApiDataSchemaName.documents_' || collection_id)::regclass AS tableId
+ *   FROM ApiCatalogSchema.collections
+ * )
+ * SELECT database_name, collection_name, shardid, size,
+ *        shardminvalue, shardmaxvalue
+ * FROM coll
+ * JOIN pg_dist_shard dist ON coll.tableId = dist.logicalrelid
+ * JOIN citus_shard_sizes() sz ON dist.shardid = sz.shard_id
+ * JOIN pg_dist_placement p ON dist.shardid = p.shardid
+ * WHERE view_definition IS NOT NULL;
+ *
+ * 返回格式：
+ * {
+ *   "_id": shard_id,
+ *   "ns": "db.collection",
+ *   "min": shard_min_value,
+ *   "max": shard_max_value,
+ *   "chunkSize": size_bytes,
+ *   "shard": "group_id"
+ * }
  */
 static Query *
 RewriteConfigChunksQueryForDistribution(Query *baseQuery)
@@ -1108,6 +1308,11 @@ UndistributeAndRedistributeTable(const char *postgresTable, const char *colocate
 
 /*
  * For sharded citus tables, colocates the table with "none".
+ * -----
+ * 将已分片的 Citus 表与 "none" 进行共置（取消共置）
+ *
+ * 此函数用于取消已分片表的共置关系，使其不再与其他表共享分片。
+ * 调用 Citus 的 alter_distributed_table 函数，将 colocate_with 设置为 'none'。
  */
 static void
 ColocateShardedCitusTablesWithNone(const char *sourceTableName)
@@ -1130,6 +1335,15 @@ ColocateShardedCitusTablesWithNone(const char *sourceTableName)
 
 /*
  * Gets the distribution details of a given citus table.
+ * -----
+ * 获取指定 Citus 表的分布式详细信息
+ *
+ * 从 citus_tables 视图查询表的分布式配置信息。
+ *
+ * 返回信息：
+ * - citus_table_type: 表类型（reference/distributed）
+ * - distribution_column: 分布列（分片键列名）
+ * - shard_count: 分片数量
  */
 static void
 GetCitusTableDistributionDetails(const char *sourceTableName, const char **citusTableType,
@@ -1164,6 +1378,15 @@ GetCitusTableDistributionDetails(const char *sourceTableName, const char **citus
 
 /*
  * breaks colocation for unsharded citus tables.
+ * -----
+ * 解除未分片 Citus 表的共置关系
+ *
+ * 根据表当前的分发模式，采用不同的策略解除共置：
+ * 1. 如果是单分片分布式表（distribution_column = '<none>'）：
+ *    直接调用 update_distributed_table_colocation 设置为 'none'
+ * 2. 如果是其他类型的分布式表：
+ *    先调用 undistribute_table 取消分布式
+ *    再调用 create_distributed_table 重新创建为单分片表
  */
 static void
 ColocateUnshardedCitusTablesWithNone(const char *sourceTableName)
@@ -1207,6 +1430,19 @@ ColocateUnshardedCitusTablesWithNone(const char *sourceTableName)
 
 /*
  * Core logic for colocating 2 unsharded citus tables.
+ * -----
+ * 共置两个未分片 Citus 表的核心逻辑
+ *
+ * 将一个未分片表与另一个未分片表进行共置，使它们共享相同的物理分片。
+ *
+ * 参数：
+ * - tableToColocate: 要共置的表
+ * - colocateWithTableName: 目标共置表
+ *
+ * 返回值：
+ * - 返回分片键值（"shard_key_value" 或 NULL）
+ * - NULL 表示单分片分布式表
+ * - "shard_key_value" 表示使用 shard_key_value 作为分布列
  */
 static const char *
 ColocateUnshardedCitusTables(const char *tableToColocate, const
@@ -1323,6 +1559,7 @@ ColocateUnshardedCitusTables(const char *tableToColocate, const
 }
 
 
+/* 获取分布式表的分片数量 */
 static int
 GetShardCountForDistributedTable(Oid relationId)
 {
@@ -1351,6 +1588,11 @@ GetShardCountForDistributedTable(Oid relationId)
 
 /*
  * Gets the colocationId for a given pg table.
+ * -----
+ * 获取指定表的共置 ID
+ *
+ * 从 pg_dist_partition 系统表查询表的共置 ID。
+ * 共置 ID 相同的表会共享相同的物理分片。
  */
 static int
 GetColocationForTable(Oid tableOid, const char *collectionName, const char *tableName)
@@ -1385,6 +1627,16 @@ GetColocationForTable(Oid tableOid, const char *collectionName, const char *tabl
 
 /*
  * Gets the node level details for a single shard table.
+ * -----
+ * 获取单分片表的节点详细信息
+ *
+ * 查询给定表的分片 ID 和托管节点的名称、端口信息。
+ *
+ * 参数：
+ * - postgresTable: PostgreSQL 表名
+ * - nodeName: 输出节点名称
+ * - nodePort: 输出节点端口
+ * - shardId: 输出分片 ID
  */
 static void
 GetNodeNamePortForPostgresTable(const char *postgresTable, char **nodeName, int *nodePort,
@@ -1456,6 +1708,11 @@ GetNodeNamePortForPostgresTable(const char *postgresTable, char **nodeName, int 
 
 /*
  * Moves a single shard table to be colocated with another target single shard table.
+ * -----
+ * 将单分片表移动到与目标单分片表共置
+ *
+ * 调用 Citus 的 citus_move_shard_placement 函数，将分片从源节点移动到目标节点。
+ * 这用于实现表共置，使相关数据位于相同的物理节点上。
  */
 static void
 MoveShardToDistributedTable(const char *postgresTableToMove, const char *targetShardTable)
@@ -1501,11 +1758,23 @@ MoveShardToDistributedTable(const char *postgresTableToMove, const char *targetS
 }
 
 
+/*
+ * Write the shard map information to BSON writer
+ * -----
+ * 将分片映射信息写入 BSON writer
+ *
+ * 生成 MongoDB 兼容的分片映射格式，包含：
+ * - map: 分片到节点列表的映射
+ * - hosts: 节点到分片的映射
+ * - nodes: 节点详细信息（角色、活跃状态、集群名称）
+ */
 static void
 WriteShardMap(pgbson_writer *writer, List *groupMap)
 {
 	/* Now that we have the list ordered by group & role, write out the object */
+	/* 首先将列表按组和角色排序后，输出对象 */
 	/* First object is "map" */
+	/* 第一个对象是 "map" */
 	pgbson_writer childWriter;
 	StringInfo hostStringInfo = makeStringInfo();
 	int32_t groupId = -1;
@@ -1520,6 +1789,7 @@ WriteShardMap(pgbson_writer *writer, List *groupMap)
 		if (nodeInfo->groupId != groupId)
 		{
 			/* New groupId */
+			/* 新的 groupId，开始一个新的分片 */
 			if (shardName != NULL)
 			{
 				PgbsonWriterAppendUtf8(&childWriter, shardName, -1, hostStringInfo->data);
@@ -1547,6 +1817,7 @@ WriteShardMap(pgbson_writer *writer, List *groupMap)
 	PgbsonWriterEndDocument(writer, &childWriter);
 
 	/* Now write the hosts object */
+	/* 现在写入 hosts 对象：节点到分片的映射 */
 	PgbsonWriterStartDocument(writer, "hosts", 5, &childWriter);
 
 	foreach(listCell, groupMap)
@@ -1562,6 +1833,7 @@ WriteShardMap(pgbson_writer *writer, List *groupMap)
 	PgbsonWriterEndDocument(writer, &childWriter);
 
 	/* Now write the nodes object */
+	/* 现在写入 nodes 对象：节点的详细信息 */
 	PgbsonWriterStartDocument(writer, "nodes", 5, &childWriter);
 
 	foreach(listCell, groupMap)
@@ -1579,6 +1851,13 @@ WriteShardMap(pgbson_writer *writer, List *groupMap)
 }
 
 
+/*
+ * Write the shard list information to BSON writer
+ * -----
+ * 将分片列表信息写入 BSON writer
+ *
+ * 生成 MongoDB 兼容的分片列表格式，包含每个分片的 ID 和节点列表。
+ */
 static void
 WriteShardList(pgbson_writer *writer, List *groupMap)
 {
@@ -1634,11 +1913,27 @@ WriteShardList(pgbson_writer *writer, List *groupMap)
 
 /*
  * Fetches the nodes in the cluster ordered by groupId and nodeRole.
+ * -----
+ * 获取集群中的节点列表，按 groupId 和 nodeRole 排序
+ *
+ * 查询 Citus 的 pg_dist_node 系统表，获取集群中所有应托管分片的节点信息。
+ *
+ * 返回：NodeInfo 结构体的列表，包含：
+ * - groupid: 组 ID
+ * - nodeid: 节点 ID
+ * - noderole: 节点角色（primary/secondary）
+ * - nodecluster: 集群名称
+ * - isactive: 是否活跃
+ *
+ * 同时生成 MongoDB 兼容的节点名称和分片名称：
+ * - mongoNodeName: node_<cluster>_<nodeid>
+ * - mongoShardName: shard_<groupid>
  */
 static List *
 GetShardMapNodes(void)
 {
 	/* First query pg_dist_node to get the set of nodes in the cluster */
+	/* 首先查询 pg_dist_node 获取集群中的节点集合 */
 	const char *baseQuery = psprintf(
 		"WITH base AS (SELECT groupid, nodeid, noderole::text, nodecluster::text, isactive FROM pg_dist_node WHERE shouldhaveshards ORDER BY groupid, noderole)"
 		" SELECT %s.BSON_ARRAY_AGG(%s.row_get_bson(base), 'nodes') FROM base",
@@ -1736,6 +2031,8 @@ GetShardMapNodes(void)
 									numFields)));
 			}
 
+			/* Generate MongoDB compatible node name and shard name */
+			/* 生成 MongoDB 兼容的节点名称和分片名称 */
 			nodeInfo->mongoNodeName = psprintf("node_%s_%d", nodeInfo->nodeCluster,
 											   nodeInfo->nodeId);
 			nodeInfo->mongoShardName = psprintf("shard_%d", nodeInfo->groupId);
