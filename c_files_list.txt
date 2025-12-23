@@ -1,8 +1,3 @@
-./pg_documentdb/include/aggregation/bson_aggregate.h
-./pg_documentdb/include/aggregation/bson_aggregation_pipeline.h
-./pg_documentdb/include/aggregation/bson_aggregation_pipeline_private.h
-./pg_documentdb/include/aggregation/bson_aggregation_statistics.h
-./pg_documentdb/include/aggregation/bson_aggregation_window_operators.h
 ./pg_documentdb/include/aggregation/bson_bucket_auto.h
 ./pg_documentdb/include/aggregation/bson_densify.h
 ./pg_documentdb/include/aggregation/bson_positional_query.h
