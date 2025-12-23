@@ -1,8 +1,3 @@
-./internal/pg_documentdb_distributed/src/distribution/node_distribution_operations.c
-./internal/pg_documentdb_distributed/src/documentdb_distributed.c
-./internal/pg_documentdb_distributed/src/documentdb_distributed_init.c
-./internal/pg_documentdb_distributed/src/rebalancer/shard_rebalancer.c
-./pg_documentdb/include/aggregation/aggregation_commands.h
 ./pg_documentdb/include/aggregation/bson_aggregate.h
 ./pg_documentdb/include/aggregation/bson_aggregation_pipeline.h
 ./pg_documentdb/include/aggregation/bson_aggregation_pipeline_private.h
