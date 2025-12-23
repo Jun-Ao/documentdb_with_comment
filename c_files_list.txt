@@ -1,13 +1,3 @@
-./pg_documentdb/include/aggregation/bson_bucket_auto.h
-./pg_documentdb/include/aggregation/bson_densify.h
-./pg_documentdb/include/aggregation/bson_positional_query.h
-./pg_documentdb/include/aggregation/bson_project.h
-./pg_documentdb/include/aggregation/bson_project_operator.h
-./pg_documentdb/include/aggregation/bson_projection_tree.h
-./pg_documentdb/include/aggregation/bson_query.h
-./pg_documentdb/include/aggregation/bson_query_common.h
-./pg_documentdb/include/aggregation/bson_sorted_accumulator.h
-./pg_documentdb/include/aggregation/bson_tree.h
 ./pg_documentdb/include/aggregation/bson_tree_common.h
 ./pg_documentdb/include/aggregation/bson_tree_private.h
 ./pg_documentdb/include/aggregation/bson_tree_write.h
