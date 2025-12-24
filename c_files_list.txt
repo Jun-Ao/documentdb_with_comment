@@ -1,13 +1,3 @@
-./pg_documentdb/include/commands/update.h
-./pg_documentdb/include/configs/config_initialization.h
-./pg_documentdb/include/customscan/bson_custom_query_scan.h
-./pg_documentdb/include/customscan/bson_custom_scan.h
-./pg_documentdb/include/customscan/bson_custom_scan_private.h
-./pg_documentdb/include/customscan/custom_scan_registrations.h
-./pg_documentdb/include/documentdb_api_init.h
-./pg_documentdb/include/geospatial/bson_geojson_utils.h
-./pg_documentdb/include/geospatial/bson_geospatial_common.h
-./pg_documentdb/include/geospatial/bson_geospatial_geonear.h
 ./pg_documentdb/include/geospatial/bson_geospatial_private.h
 ./pg_documentdb/include/geospatial/bson_geospatial_shape_operators.h
 ./pg_documentdb/include/geospatial/bson_geospatial_wkb_iterator.h
