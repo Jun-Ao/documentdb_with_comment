@@ -3,7 +3,10 @@
  *
  * include/bson/bson_json_schema_tree.h
  *
- * Common declarations of structs and functions for handling bson json schema tree.
+ * BSON JSON模式树处理的结构体和函数通用声明
+ *
+ * 本文件定义了DocumentDB中BSON JSON模式树的核心数据结构，
+ * 用于模式验证和约束检查，支持MongoDB的JSON Schema验证功能。
  *
  *-------------------------------------------------------------------------
  */
@@ -17,51 +20,62 @@
 #include "query/bson_dollar_operators.h"
 
 /* -------------------------------------------------------- */
-/*                  Data types                              */
+/*                  数据类型定义                              */
 /* -------------------------------------------------------- */
 
+/* 模式节点结构体前向声明 */
 typedef struct SchemaNode SchemaNode;
+
+/* 模式字段节点结构体前向声明 */
 typedef struct SchemaFieldNode SchemaFieldNode;
+
+/* 模式关键字节点结构体前向声明 */
 typedef struct SchemaKeywordNode SchemaKeywordNode;
 
+/* BSON类型标志位枚举
+ * 使用位标志来表示支持的BSON数据类型
+ */
 typedef enum BsonTypeFlags
 {
-	BsonTypeFlag_EOD = 1 << 0,
-	BsonTypeFlag_DOUBLE = 1 << 1,
-	BsonTypeFlag_UTF8 = 1 << 2,
-	BsonTypeFlag_DOCUMENT = 1 << 3,
-	BsonTypeFlag_ARRAY = 1 << 4,
-	BsonTypeFlag_BINARY = 1 << 5,
-	BsonTypeFlag_UNDEFINED = 1 << 6,
-	BsonTypeFlag_OID = 1 << 7,
-	BsonTypeFlag_BOOL = 1 << 8,
-	BsonTypeFlag_DATE_TIME = 1 << 9,
-	BsonTypeFlag_NULL = 1 << 10,
-	BsonTypeFlag_REGEX = 1 << 11,
-	BsonTypeFlag_DBPOINTER = 1 << 12,
-	BsonTypeFlag_CODE = 1 << 13,
-	BsonTypeFlag_SYMBOL = 1 << 14,
-	BsonTypeFlag_CODEWSCOPE = 1 << 15,
-	BsonTypeFlag_INT32 = 1 << 16,
-	BsonTypeFlag_TIMESTAMP = 1 << 17,
-	BsonTypeFlag_INT64 = 1 << 18,
-	BsonTypeFlag_DECIMAL128 = 1 << 19,
-	BsonTypeFlag_MINKEY = 1 << 20,
-	BsonTypeFlag_MAXKEY = 1 << 21
+	BsonTypeFlag_EOD = 1 << 0,              /* 文档结束标志 */
+	BsonTypeFlag_DOUBLE = 1 << 1,          /* 双精度浮点数 */
+	BsonTypeFlag_UTF8 = 1 << 2,             /* UTF8字符串 */
+	BsonTypeFlag_DOCUMENT = 1 << 3,        /* 文档对象 */
+	BsonTypeFlag_ARRAY = 1 << 4,            /* 数组 */
+	BsonTypeFlag_BINARY = 1 << 5,          /* 二进制数据 */
+	BsonTypeFlag_UNDEFINED = 1 << 6,       /* 未定义类型 */
+	BsonTypeFlag_OID = 1 << 7,             /* 对象ID */
+	BsonTypeFlag_BOOL = 1 << 8,            /* 布尔值 */
+	BsonTypeFlag_DATE_TIME = 1 << 9,       /* 日期时间 */
+	BsonTypeFlag_NULL = 1 << 10,           /* 空值 */
+	BsonTypeFlag_REGEX = 1 << 11,          /* 正则表达式 */
+	BsonTypeFlag_DBPOINTER = 1 << 12,      /* 数据库指针 */
+	BsonTypeFlag_CODE = 1 << 13,           /* 代码 */
+	BsonTypeFlag_SYMBOL = 1 << 14,         /* 符号 */
+	BsonTypeFlag_CODEWSCOPE = 1 << 15,     /* 带作用域的代码 */
+	BsonTypeFlag_INT32 = 1 << 16,          /* 32位整数 */
+	BsonTypeFlag_TIMESTAMP = 1 << 17,      /* 时间戳 */
+	BsonTypeFlag_INT64 = 1 << 18,          /* 64位整数 */
+	BsonTypeFlag_DECIMAL128 = 1 << 19,     /* 128位十进制数 */
+	BsonTypeFlag_MINKEY = 1 << 20,         /* 最小键 */
+	BsonTypeFlag_MAXKEY = 1 << 21          /* 最大键 */
 } BsonTypeFlags;
 
+/* 对象验证类型枚举
+ * 定义了JSON Schema中对象类型的验证规则
+ */
 typedef enum ObjectValidationTypes
 {
-	ObjectValidationTypes_MaxProperties = 1 << 0,
-	ObjectValidationTypes_MinProperties = 1 << 1,
-	ObjectValidationTypes_Required = 1 << 2,
-	ObjectValidationTypes_Properties = 1 << 3,
-	ObjectValidationTypes_PatternProperties = 1 << 4,
-	ObjectValidationTypes_AdditionalPropertiesBool = 1 << 5,
-	ObjectValidationTypes_AdditionalPropertiesObject = 1 << 6,
-	ObjectValidationTypes_Dependency = 1 << 7,
-	ObjectValidationTypes_DependencyArray = 1 << 8,
-	ObjectValidationTypes_DependencyObject = 1 << 9,
+	ObjectValidationTypes_MaxProperties = 1 << 0,      /* 最大属性数量 */
+	ObjectValidationTypes_MinProperties = 1 << 1,      /* 最小属性数量 */
+	ObjectValidationTypes_Required = 1 << 2,           /* 必需字段 */
+	ObjectValidationTypes_Properties = 1 << 3,         /* 属性定义 */
+	ObjectValidationTypes_PatternProperties = 1 << 4,  /* 模式属性 */
+	ObjectValidationTypes_AdditionalPropertiesBool = 1 << 5,  /* 额外属性布尔标志 */
+	ObjectValidationTypes_AdditionalPropertiesObject = 1 << 6, /* 额外属性对象 */
+	ObjectValidationTypes_Dependency = 1 << 7,         /* 依赖关系 */
+	ObjectValidationTypes_DependencyArray = 1 << 8,    /* 依赖数组 */
+	ObjectValidationTypes_DependencyObject = 1 << 9,   /* 依赖对象 */
 } ObjectValidationTypes;
 
 typedef enum CommonValidationTypes

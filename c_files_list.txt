@@ -1,15 +1,3 @@
-./pg_documentdb/include/geospatial/bson_geospatial_private.h
-./pg_documentdb/include/geospatial/bson_geospatial_shape_operators.h
-./pg_documentdb/include/geospatial/bson_geospatial_wkb_iterator.h
-./pg_documentdb/include/index_am/documentdb_rum.h
-./pg_documentdb/include/index_am/index_am_exports.h
-./pg_documentdb/include/index_am/index_am_utils.h
-./pg_documentdb/include/index_am/roaring_bitmap_adapter.h
-./pg_documentdb/include/infrastructure/bgworker_job_logger.h
-./pg_documentdb/include/infrastructure/cursor_store.h
-./pg_documentdb/include/infrastructure/documentdb_plan_cache.h
-./pg_documentdb/include/infrastructure/job_management.h
-./pg_documentdb/include/jsonschema/bson_json_schema_tree.h
 ./pg_documentdb/include/metadata/collection.h
 ./pg_documentdb/include/metadata/index.h
 ./pg_documentdb/include/metadata/metadata_cache.h

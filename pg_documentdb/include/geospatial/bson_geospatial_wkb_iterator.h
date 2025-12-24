@@ -3,7 +3,10 @@
  *
  * include/geospatial/bson_geospatial_wkb_iterator.h
  *
- * Custom iterator for WKB buffer
+ * WKB缓冲区的自定义迭代器
+ *
+ * 本文件定义了DocumentDB中用于遍历WKB（Well-Known Binary）缓冲区的迭代器实现，
+ * 提供了高效的WKB几何对象遍历和访问功能。
  *
  *-------------------------------------------------------------------------
  */
@@ -15,97 +18,97 @@
 #include "geospatial/bson_geospatial_private.h"
 #include "utils/documentdb_errors.h"
 
+/* WKB缓冲区迭代器结构体 */
 typedef struct WKBBufferIterator
 {
-	/* Pointer to start of wkb buffer */
+	/* 指向WKB缓冲区起始位置的指针 */
 	const char *headptr;
 
-	/* Pointer to current position in buffer while iterating */
+	/* 迭代过程中当前在缓冲区中的位置指针 */
 	char *currptr;
 
-	/* Original length of buffer */
+	/* 缓冲区的原始长度 */
 	int len;
 }WKBBufferIterator;
 
 
 /*
- * A set of const pointer, length and type describing a shape in between a WKB buffer
- * This is designed to be an immutable const struct to avoid any accidental modification of the buffer
- * and also helps in avoiding memcpy from original wkb buffer to get the single geometry buffer by
- * referring to the pointers in original buffer.
+ * 描述WKB缓冲区中形状的常量指针、长度和类型集合
+ * 设计为不可变的常量结构体，避免意外修改缓冲区
+ * 通过引用原始缓冲区中的指针来获取单个几何缓冲区，避免了memcpy操作
  *
- * Other shape specific const properties can also be added in the future.
+ * 未来还可以添加其他形状特定的常量属性
  */
 typedef struct WKBGeometryConst
 {
-	/* Shape definition */
-	const WKBGeometryType geometryType;
-	const char *geometryStart;
-	const int32 length;
+	/* 形状定义 */
+	const WKBGeometryType geometryType;    // 几何类型
+	const char *geometryStart;            // 几何数据起始位置
+	const int32 length;                    // 几何数据长度
 
-	/* Polygon state */
-	const char *ringPointsStart;
-	const int32 numRings;
-	const int32 numPoints;
+	/* 多边形状态 */
+	const char *ringPointsStart;           // 环点数据起始位置
+	const int32 numRings;                  // 环数量
+	const int32 numPoints;                 // 点数量
 } WKBGeometryConst;
 
 
+/* WKB访问者函数结构体，用于在遍历WKB缓冲区时执行自定义操作 */
 typedef struct WKBVisitorFunctions
 {
 	/*
-	 * Executed for a complete geometry represented by the WKB buffer type, it can be an atomic type such as
-	 * Point, Linestring, Polygon or a Multi collection such as MultiPoint, GeometryCollection etc.
+	 * 遍历WKB缓冲区类型表示的完整几何对象时执行
+	 * 可以是原子类型，如点、线、多边形，或多重集合，如多点、几何集合等
 	 */
 	void (*VisitGeometry)(const WKBGeometryConst *wkbGeometry, void *state);
 
 	/*
-	 * Executed for each individual geometries inside of a Multi collection geometry.
+	 * 对多重集合几何中的每个单独几何对象执行
 	 */
 	void (*VisitSingleGeometry)(const WKBGeometryConst *wkbGeometry, void *state);
 
-
 	/*
-	 * Called for each individual point found during traversal, points can be part of any geometry e.g lineString, polygons rings, multipoint etc.
+	 * 遍历时对每个找到的单个点调用，点可以是任何几何的一部分，如线、多边形环、多点等
 	 */
 	void (*VisitEachPoint)(const WKBGeometryConst *wkbGeometry, void *state);
 
-	/* Currently only called during polygon validation to check for validitiy of each ring */
+	/* 目前仅在多边形验证期间调用，以检查每个环的有效性 */
 	void (*VisitPolygonRing)(const WKBGeometryConst *wkbGeometry, void *state);
 
 	/*
-	 * Whether or not continue traversal of the WKB buffer, this can be used to stop the traversal
+	 * 是否继续遍历WKB缓冲区，可用于停止遍历
 	 */
 	bool (*ContinueTraversal)(void *state);
 } WKBVisitorFunctions;
 
 
-/* Initialize a WKBBufferIterator from given wkb buffer stringinfo */
+/* 从给定的WKB缓冲区StringInfo初始化WKBBufferIterator */
 static inline void
 InitIteratorFromWKBBuffer(WKBBufferIterator *iter, StringInfo wkbBuffer)
 {
 	iter->headptr = wkbBuffer->data;
 
-	/* Set currptr also to wkbBuffer->data as we start from the head */
+	/* 将currptr也设置为wkbBuffer->data，因为我们从头开始 */
 	iter->currptr = wkbBuffer->data;
 
 	iter->len = wkbBuffer->len;
 }
 
 
-/* Initialize a WKBBufferIterator from given char * and length */
+/* 从给定的char指针和长度初始化WKBBufferIterator */
 static inline void
 InitIteratorFromPtrAndLen(WKBBufferIterator *iter, const char *currptr, int32 len)
 {
 	iter->headptr = currptr;
 
-	/* Set currptr also to wkbBuffer->data as we start from the head */
+	/* 将currptr也设置为wkbBuffer->data，因为我们从头开始 */
 	iter->currptr = (char *) currptr;
 
 	iter->len = len;
 }
 
 
-/* Util to increment current pointer in iterator by given number of bytes */
+/* 工具函数：按给定字节数递增迭代器中的当前指针 */
 static inline void
 IncrementWKBBufferIteratorByNBytes(WKBBufferIterator *iter, size_t bytes)
 {
@@ -129,8 +132,21 @@ IncrementWKBBufferIteratorByNBytes(WKBBufferIterator *iter, size_t bytes)
 }
 
 
+/* 遍历WKB缓冲区
+ * 输入参数：
+ *   - wkbBuffer: WKB缓冲区
+ *   - visitorFuncs: 访问者函数集合
+ *   - state: 访问者状态
+ */
 void TraverseWKBBuffer(const StringInfo wkbBuffer, const
 					   WKBVisitorFunctions *visitorFuncs, void *state);
+
+/* 遍历WKB字节流
+ * 输入参数：
+ *   - wkbBytea: WKB字节流
+ *   - visitorFuncs: 访问者函数集合
+ *   - state: 访问者状态
+ */
 void TraverseWKBBytea(const bytea *wkbBytea, const WKBVisitorFunctions *visitorFuncs,
 					  void *state);
 
