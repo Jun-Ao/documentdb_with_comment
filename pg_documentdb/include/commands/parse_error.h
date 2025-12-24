@@ -3,7 +3,8 @@
  *
  * include/commands/parse_error.h
  *
- * Errors thrown for common parse errors.
+ * 解析错误的异常处理函数
+ * 定义了常见的解析错误处理和类型检查函数
  *
  *-------------------------------------------------------------------------
  */
@@ -17,6 +18,7 @@
 #define PARSE_ERROR_H
 
 
+/* 抛出顶级类型不匹配错误 */
 static inline void
 ThrowTopLevelTypeMismatchError(const char *fieldName, const char *fieldTypeName,
 							   const char *expectedTypeName)
@@ -32,8 +34,7 @@ ThrowTopLevelTypeMismatchError(const char *fieldName, const char *fieldTypeName,
 
 
 /*
- * Throw an error if type of the value that given iterator holds doesn't
- * match the expected one.
+ * 如果给定迭代器持有的值的类型与预期不匹配，则抛出错误
  */
 static inline void
 EnsureTopLevelFieldType(const char *fieldName, const bson_iter_t *iter,
@@ -49,7 +50,7 @@ EnsureTopLevelFieldType(const char *fieldName, const bson_iter_t *iter,
 
 
 /*
- * Variant of the above with values.
+ * 上述函数的值版本变体
  */
 static inline void
 EnsureTopLevelFieldValueType(const char *fieldName, const bson_value_t *value,
@@ -64,17 +65,13 @@ EnsureTopLevelFieldValueType(const char *fieldName, const bson_value_t *value,
 
 
 /*
- * Similar to EnsureTopLevelFieldType, but null value is also ok even if
- * expectedType is not "null".
+ * 类似于 EnsureTopLevelFieldType，但如果 expectedType 不是 "null"，null 值也是允许的
  *
- * That means;
- *  - Returns true if type of the value that it holds matches the expected
- *    one.
- *  - Otherwise, returns false if iterator holds null value else throws an
- *    error.
+ * 这意味着：
+ *  - 如果它持有的值类型匹配预期类型，则返回 true
+ *  - 否则，如果迭代器持有 null 值则返回 false，否则抛出错误
  *
- * Mostly useful when given field being set to null implies using the default
- * setting for that spec option.
+ * 主要用于当给定字段设置为 null 意味着使用该规范选项的默认设置时
  */
 static inline bool
 EnsureTopLevelFieldTypeNullOk(const char *fieldName, const bson_iter_t *iter,
@@ -91,17 +88,13 @@ EnsureTopLevelFieldTypeNullOk(const char *fieldName, const bson_iter_t *iter,
 
 
 /*
- * Similar to EnsureTopLevelFieldType, but null value is also ok even if
- * expectedType is not "null" or "undefined".
+ * 类似于 EnsureTopLevelFieldType，但如果 expectedType 不是 "null" 或 "undefined"，null 值也是允许的
  *
- * That means;
- *  - Returns true if type of the value that it holds matches the expected
- *    one.
- *  - Otherwise, returns false if iterator holds null value else throws an
- *    error.
+ * 这意味着：
+ *  - 如果它持有的值类型匹配预期类型，则返回 true
+ *  - 否则，如果迭代器持有 null 值则返回 false，否则抛出错误
  *
- * Mostly useful when given field being set to null implies using the default
- * setting for that spec option.
+ * 主要用于当给定字段设置为 null 意味着使用该规范选项的默认设置时
  */
 static inline bool
 EnsureTopLevelFieldTypeNullOkUndefinedOK(const char *fieldName, const bson_iter_t *iter,
@@ -119,8 +112,7 @@ EnsureTopLevelFieldTypeNullOkUndefinedOK(const char *fieldName, const bson_iter_
 
 
 /*
- * Throw an error if type of the value that given iterator holds cannot be
- * interpreted as a boolean.
+ * 如果给定迭代器持有的值无法解释为布尔值，则抛出错误
  */
 static inline void
 EnsureTopLevelFieldIsBooleanLike(const char *fieldName, const bson_iter_t *iter)
@@ -141,8 +133,7 @@ EnsureTopLevelFieldIsBooleanLike(const char *fieldName, const bson_iter_t *iter)
 
 
 /*
- * Throw an error if type of the value that given iterator holds cannot be
- * interpreted as a number.
+ * 如果给定迭代器持有的值无法解释为数字，则抛出错误
  */
 static inline void
 EnsureTopLevelFieldIsNumberLike(const char *fieldName, const bson_value_t *value)
@@ -163,16 +154,13 @@ EnsureTopLevelFieldIsNumberLike(const char *fieldName, const bson_value_t *value
 
 
 /*
- * Similar to EnsureTopLevelFieldIsBooleanLike, but null value is also ok.
+ * 类似于 EnsureTopLevelFieldIsBooleanLike，但 null 值也是允许的
  *
- * That means;
- *  - Returns true if type of the value that it holds can be interpreted as
- *    a boolean.
- *  - Otherwise, returns false if iterator holds null value else throws an
- *    error.
+ * 这意味着：
+ *  - 如果它持有的值可以解释为布尔值，则返回 true
+ *  - 否则，如果迭代器持有 null 值则返回 false，否则抛出错误
  *
- * Mostly useful when given field being set to null implies using the default
- * setting for that spec option.
+ * 主要用于当给定字段设置为 null 意味着使用该规范选项的默认设置时
  */
 static inline bool
 EnsureTopLevelFieldIsBooleanLikeNullOk(const char *fieldName, const bson_iter_t *iter)
@@ -187,6 +175,7 @@ EnsureTopLevelFieldIsBooleanLikeNullOk(const char *fieldName, const bson_iter_t 
 }
 
 
+/* 抛出顶级字段缺失错误 */
 static inline void
 ThrowTopLevelMissingFieldError(const char *fieldName)
 {
@@ -196,6 +185,7 @@ ThrowTopLevelMissingFieldError(const char *fieldName)
 }
 
 
+/* 带错误代码的顶级字段缺失错误 */
 static inline void
 ThrowTopLevelMissingFieldErrorWithCode(const char *fieldName, int code)
 {
@@ -207,6 +197,7 @@ ThrowTopLevelMissingFieldErrorWithCode(const char *fieldName, int code)
 }
 
 
+/* 确保字符串值不以 $ 开头（MongoDB 操作符限制） */
 static inline void
 EnsureStringValueNotDollarPrefixed(const char *fieldValue, int fieldLength)
 {

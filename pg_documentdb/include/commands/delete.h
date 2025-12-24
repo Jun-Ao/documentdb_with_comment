@@ -3,7 +3,8 @@
  *
  * include/commands/delete.h
  *
- * Exports related to implementation of a single-document delete.
+ * 单文档删除操作的导出声明
+ * 定义了删除操作的参数结构和返回结果
  *
  *-------------------------------------------------------------------------
  */
@@ -17,47 +18,51 @@
 
 
 /*
- * DeleteOneParams describes delete operation for a single document.
+ * 单文档删除操作参数结构体
+ * 描述针对单个文档的删除操作参数
  */
 typedef struct
 {
-	/* list of Deletions */
+	/* 删除查询条件（BSON 格式） */
 	const bson_value_t *query;
 
-	/* sort order to use when selecting 1 row */
+	/* 用于选择单行时的排序顺序 */
 	const bson_value_t *sort;
 
-	/* whether to return deleted document */
+	/* 是否返回被删除的文档 */
 	bool returnDeletedDocument;
 
-	/* fields to return if returning a document */
+	/* 如果返回文档时需要返回的字段 */
 	const bson_value_t *returnFields;
 
-	/* parsed variable spec*/
+	/* 解析后的变量规范 */
 	const bson_value_t *variableSpec;
 
-	/* collation string */
+	/* 排序规则字符串 */
 	const char collationString[MAX_ICU_COLLATION_LENGTH];
 } DeleteOneParams;
 
 
 /*
- * DeleteOneRow reflects the result of a single-row delete
- * on a single shard.
+ * 单行删除结果结构体
+ * 反映在单个分片上执行单行删除操作的结果
  */
 typedef struct
 {
-	/* whether one row matched the query and was deleted */
+	/* 是否有一行匹配查询并被删除 */
 	bool isRowDeleted;
 
-	/* object_id of the deleted document (only used within delete_one) */
+	/* 被删除文档的对象ID（仅在 delete_one 内部使用） */
 	pgbson *objectId;
 
-	/* value of the deleted (and maybe projected) document, if requested and matched any */
+	/* 被删除文档的值（可能已被投影），如果请求且有匹配项 */
 	pgbson *resultDeletedDocument;
 } DeleteOneResult;
 
 
+/* 调用删除单个文档的函数
+ * 执行实际的删除操作，处理分片键哈希、事务等
+ */
 void CallDeleteOne(MongoCollection *collection, DeleteOneParams *deleteOneParams,
 				   int64 shardKeyHash, text *transactionId, bool forceInlineWrites,
 				   DeleteOneResult *result);

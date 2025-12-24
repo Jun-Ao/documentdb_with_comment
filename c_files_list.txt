@@ -1,13 +1,3 @@
-./pg_documentdb/include/commands/create_indexes.h
-./pg_documentdb/include/commands/cursor_common.h
-./pg_documentdb/include/commands/cursor_private.h
-./pg_documentdb/include/commands/delete.h
-./pg_documentdb/include/commands/diagnostic_commands_common.h
-./pg_documentdb/include/commands/drop_indexes.h
-./pg_documentdb/include/commands/insert.h
-./pg_documentdb/include/commands/lock_tags.h
-./pg_documentdb/include/commands/parse_error.h
-./pg_documentdb/include/commands/retryable_writes.h
 ./pg_documentdb/include/commands/update.h
 ./pg_documentdb/include/configs/config_initialization.h
 ./pg_documentdb/include/customscan/bson_custom_query_scan.h
