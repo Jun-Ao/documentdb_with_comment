@@ -1,9 +1,4 @@
-./pg_documentdb/include/metadata/collection.h
-./pg_documentdb/include/metadata/index.h
 ./pg_documentdb/include/metadata/metadata_cache.h
-./pg_documentdb/include/metadata/metadata_guc.h
-./pg_documentdb/include/metadata/relation_utils.h
-./pg_documentdb/include/opclass/bson_gin_common.h
 ./pg_documentdb/include/opclass/bson_gin_composite_private.h
 ./pg_documentdb/include/opclass/bson_gin_composite_scan.h
 ./pg_documentdb/include/opclass/bson_gin_index_mgmt.h
